@@ -69,3 +69,6 @@ async def report_message(link, api_id, api_hash) -> None:
             except Exception as e:
                 await client.disconnect()
                 print(e)
+                return "error"
+        return "ok"
+    return "link_error"

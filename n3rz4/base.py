@@ -21,10 +21,6 @@ class User(Base):
         now = datetime.now()
         self.reset_daily_request_limit()
         time_until_reset = self.get_time_until_reset()
-        if time_until_reset == timedelta(0):
-            self.requests = 15
-            session.add(self)
-            session.commit()
         if self.requests <= 0:
             return {
                 "can_request": False,
@@ -41,7 +37,6 @@ class User(Base):
                     "time_until_next_request": time_until_next_request,
                     "time_until_reset": time_until_reset,
                 }
-        self.requests -= 1
         self.last_request_time = now
         session.add(self)
         session.commit()
@@ -52,9 +47,22 @@ class User(Base):
             "time_until_reset": time_until_reset,
             "message": "Запрос выполнен успешно",
         }
-        
+
+    def set_last_request_time(self):
+        now = datetime.now()
+        self.last_request_time = now
+        session.add(self)
+        session.commit()
+
     def get_requests(self):
         return self.reset_daily_request_limit()
+
+    def spend_request(self):
+        self.requests -= 1
+        if self.requests < 0:
+            self.requests = 0
+        session.add(self)
+        session.commit()
 
     def get_time_until_reset(self):
         now = datetime.now()
@@ -73,7 +81,7 @@ class User(Base):
             )
             session.add(self)
             session.commit()
-            
+
         return self.requests
 
 
