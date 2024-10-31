@@ -16,16 +16,19 @@ async def count_session(api_id, api_hash, botm) -> None:
             "n3rz4/sessions/{}".format(session), api_id, api_hash
         )
         await client.connect()
-
-        if not client.is_user_authorized:
-            print("Сессия {} не авторизована.".format(session))
-        else:
-            count += 1
-            await botm.edit(
-                f"🔄 <b>Количество найденных сессий</b>: {count}",
-                parse_mode="html",
-            )
-        await client.disconnect()
+        try:
+            if not client.is_user_authorized:
+                print("Сессия {} не авторизована.".format(session))
+            else:
+                count += 1
+                await botm.edit(
+                    f"🔄 <b>Количество найденных сессий</b>: {count}",
+                    parse_mode="html",
+                )
+            await client.disconnect()
+        except Exception as e:
+            await client.disconnect()
+            print(e)
     return count
 
 
@@ -47,8 +50,6 @@ async def report_message(link, api_id, api_hash) -> None:
 
             if not client.is_user_authorized:
                 print("Сессия {} не авторизована.".format(session))
-
-            print(123)
 
             try:
                 entity = await client.get_entity(chat)

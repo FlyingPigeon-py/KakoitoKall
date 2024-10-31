@@ -5,6 +5,10 @@ from n3rz4.reports import count_session, report_message
 from datetime import datetime, timedelta
 
 
+def millisecond_strip(time):
+    return ":".join(str(time).split(".", 2)[:1])
+
+
 class TelegramBot:
     def __init__(self, client, api_id, api_hash) -> None:
         self.client = client
@@ -36,7 +40,7 @@ class TelegramBot:
         subscription_status = (
             "⛔️ <b>Отсутствует</b>"
             if user.subscribe is None
-            else f"✅ <b>Активна до</b> <code>{user.subscribe}</code>."
+            else f"✅ <b>Активна до</b> <code>{millisecond_strip(user.subscribe)}</code>."
         )
 
         text = (
@@ -59,6 +63,7 @@ class TelegramBot:
             "📄 <b>Список доступных команд:</b>\n\n"
             "<b>/start</b> — Перезапустить бота\n"
             "<b>/help</b> — Показать это сообщение\n"
+            "<b>/status</b> — Показать информацию о подписке и запросах\n"
             "<b>/ss</b> <i>{ссылка на сообщение}</i> — Запустить снос аккаунта\n"
             "\n"
         )
@@ -66,6 +71,7 @@ class TelegramBot:
         if user_id in self.admins or user.status == "admin":
             help_text += (
                 "👑 <b>Административные команды:</b>\n\n"
+                "<b>/count</b> — Посчитает и выведет количество активных сессий\n"
                 "<b>/subscribe</b> <i>{id} {дней}</i> — Добавить подписку пользователю на определённое количество дней\n"
                 "<b>/add_admin</b> <i>{id}</i> — Назначить пользователя администратором\n"
                 "<b>/remove_admin</b> <i>{id}</i> — Удалить пользователя из администраторов\n"
@@ -111,6 +117,14 @@ class TelegramBot:
                 f"получил подписку до <code>{user.subscribe}</code>.</b>",
                 parse_mode="html",
             )
+
+            await self.client.send_message(
+                user_id,
+                f"✅ Ваша подписка активирована\nДействует до <code>{user.subscribe.strftime('%Y-%m-%d %H:%M:%S')}</code>.\n"
+                "Теперь у вас есть доступ к 15 запросам в день.\n\nЕсли произошла какая-то ошибка то пишите <b>@fenomenSS</b>",
+                parse_mode="html",
+            )
+
         else:
             await msg.reply(
                 "⚠️ <b>Этот пользователь не зарегистрирован. Попросите его написать /start в боте.</b>",
@@ -124,34 +138,39 @@ class TelegramBot:
         subscription_status = (
             "⛔️ <b>Подписка отсутствует</b>"
             if user.subscribe is None
-            else f"✅ <b>Подписка активна до:</b> <code>{user.subscribe}</code>."
+            else f" ✅ Подписан\n\n⌛ <b>Подписка активна до:</b> <code>{millisecond_strip(user.subscribe)}</code>."
         )
 
         buttons = None
         if user.subscribe is None:
             buttons = [[Button.inline("💳 Купить подписку", b"buy_subscription")]]
 
+        message = f"💼 <b>Ваш статус подписки:</b> {subscription_status}"
+        if user.subscribe:
+            message += f"\n\n📨 <b>Запросов доступно:</b> {user.get_requests()} (Обновиться через {millisecond_strip(user.get_time_until_reset())})"
         await msg.reply(
-            f"💼 <b>Ваш статус подписки:</b> {subscription_status}",
+            message,
             buttons=buttons,
-            parse_mode="html"
+            parse_mode="html",
         )
 
     async def count_handler(self, msg) -> None:
         user_id = msg.sender_id
-        # user = await check_subscription(user_id)
-
         if user_id in self.admins:
             bot_message = await msg.reply(
                 "🔄<b>Подсчёт сессий запущен</b>",
                 parse_mode="html",
             )
-            count = await count_session(self.api_id, self.api_hash, bot_message)
-            
-            await bot_message.edit(
-                f"✅ <b>Общее кол-во сессий:</b> {count}",
-                parse_mode="html",
-            )
+            try:
+                count = await count_session(self.api_id, self.api_hash, bot_message)
+                await bot_message.edit(
+                    f"✅ <b>Общее кол-во сессий:</b> {count}",
+                    parse_mode="html",
+                )
+            except Exception:
+                await bot_message.edit(
+                    "❌ Не удалось посчитать количество сессий", parse_mode="html"
+                )
         else:
             await msg.reply(
                 "❌ <b>Купите подписку для использования данной команды.</b>",
@@ -172,13 +191,22 @@ class TelegramBot:
         user = await check_subscription(user_id)
 
         if user_id in self.admins or user.status == "admin" or user.subscribe:
-            await msg.reply(
+            bot_message = await msg.reply(
                 "🔄 <b>Процесс удаления аккаунта запущен. Пожалуйста, ожидайте завершения.</b>",
                 parse_mode="html",
             )
-            await report_message(link, self.api_id, self.api_hash)
-            await msg.reply(
-                "✅ <b>Удаление завершено. Аккаунт будет заблокирован в ближайшее время.</b>",
+            message = "✅ <b>Удаление завершено. Аккаунт будет заблокирован в ближайшее время.</b>"
+            data = user.can_make_request()
+            if not data["can_request"] and user_id not in self.admins:
+                if user.get_requests() != 0:
+                    message = f"⌛ <b>Подождите {':'.join(str(data['time_until_next_request']).split('.', 2)[:1])} перед следующим запросом</b>"
+                else:
+                    message = f"⌛ <b>Ваш запас в 15 запросов исчерпан, до восстановления {':'.join(str(data['time_until_reset']).split('.', 2)[:1])}</b>\n\nКупить больше запросы вы можете у @fenomenSS по 1.5$"
+            else:
+                message = f"✅ <b>Удаление завершено. Аккаунт будет заблокирован в ближайшее время.</b>\n\n📨 <b>Запросов доступно:</b> {user.get_requests()} (Обновиться через {millisecond_strip(user.get_time_until_reset())})"
+
+            await bot_message.edit(
+                message,
                 parse_mode="html",
             )
         else:
@@ -206,8 +234,13 @@ class TelegramBot:
     async def _show_subscription_options(self, query) -> None:
         buttons = [
             [Button.inline("🗓 Неделя", b"week"), Button.inline("📅 Месяц", b"month")],
-            [Button.inline("📆 Год", b"year"), Button.inline("♾ Навсегда", b"forever")],
-            [Button.inline("👑 Админка", b"buy_admin")],
+            [
+                Button.inline("📆 3 месяца", b"year"),
+                Button.inline("📆 Пол года", b"buy_admin"),
+            ],
+            [
+                Button.inline("📆 Год", b"forever"),
+            ],
             [Button.inline("« Назад", b"back_to_menu")],
         ]
         await query.edit(
@@ -218,11 +251,11 @@ class TelegramBot:
 
     async def _show_subscription_confirmation(self, query) -> None:
         period = {
-            b"week": ("Неделя", "300р / 3.5$ / 125₴"),
-            b"month": ("Месяц", "900р / 10$ / 375₴"),
-            b"year": ("Год", "2500р / 27.5$ / 1125₴"),
-            b"forever": ("Навсегда", "3500р / 38$ / 1575₴"),
-            b"buy_admin": ("Админка", "8000р / 85$ / 3400₴"),
+            b"week": ("Неделя", "500р / 5$"),
+            b"month": ("Месяц", "800р / 8$"),
+            b"year": ("3 месяца", "2000р / 20$"),
+            b"forever": ("Пол года", "3500р / 35$"),
+            b"buy_admin": ("Год", "5000р / 50$"),
         }
 
         period_name, price = period[query.data]
